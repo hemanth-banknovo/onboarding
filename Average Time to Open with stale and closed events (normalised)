@@ -1,0 +1,86 @@
+## dates entered manually
+
+WITH handling_times_itemized AS 
+( 
+       -- This subquery shows, for every application as a separate row, the timestamps for completed, ready_to_open, and account_opened events
+       -- and the time between these events both in hours and in INTERVALs 
+       SELECT application_id, 
+              completed, 
+              ready_to_open, 
+              account_opened, 
+              -- convert intervals to hours 
+              Extract(epoch FROM (ready_to_open  - completed)::interval)/3600     AS novo_handling_time_hours,
+              Extract(epoch FROM (account_opened - ready_to_open)::interval)/3600 AS mfs_handling_time_hours,
+              Extract(epoch FROM (account_opened - completed)::interval)/3600     AS total_handling_time_hours,
+              ready_to_open  - completed                                           AS novo_handling_time,
+              account_opened - ready_to_open                                       AS mfs_handling_time,
+              account_opened - completed                                           AS total_handling_time
+       FROM   ( 
+                       -- This subquery adds the completed and ready_to_open timestamps for the corresponding application as additional columns to every account_opened event
+                       -- it then renames the columns so that (for all account_opened events) the column names refer to the event name of the timestamp they contain
+                       SELECT   application_id, 
+                                event, 
+                                Lag(created_at, 2) OVER (partition BY application_id ORDER BY created_at ASC) AS completed,
+                                Lag(created_at) OVER (partition BY application_id ORDER BY created_at ASC)    AS ready_to_open,
+                                created_at                                                                    AS account_opened
+                       FROM     ( 
+                                         -- This subquery retrieves all completed, ready_to_open, and account_opened events for applications which resulted in an opened account
+                                         SELECT   application_id, 
+                                                  event, 
+                                                  created_at, 
+                                                  Row_number() OVER (partition BY event, application_id ORDER BY created_at ASC) AS duplication_index
+                                         FROM     application_events 
+                                         WHERE    event IN ('completed', 
+                                                            'ready_to_open', 
+                                                            'account_opened') 
+                                         AND      application_events.application_id IN 
+                                                  ( 
+                                                         SELECT application_id 
+                                                         FROM   application_events 
+                                                         WHERE  event ='account_opened' 
+                                                         AND    created_at BETWEEN '9-1-2020' AND '10-1-2020') 
+                                                  -- AND application_events.application_id IN (SELECT id FROM applications_view WHERE status='account_opened' AND created_at > CURRENT_DATE - INTERVAL '14 weeks')
+                                         ORDER BY application_id, 
+                                                  created_at ASC ) AS q 
+                                -- filter out duplicate events for the same application, only keeping the last occurrence of an event when duplicates exist
+                       WHERE    duplication_index = 1 ) AS x 
+              -- filter out all non-account_opened events as we have added the completed and ready_to_open timestamps as columns to those events
+       WHERE  event = 'account_opened' ), outlier_bounds AS 
+( 
+       SELECT (Avg(total_handling_time_hours) + Stddev_samp(total_handling_time_hours) * 1.65) AS upper_bound,
+              (Avg(total_handling_time_hours) - Stddev_samp(total_handling_time_hours) * 1.65) AS lower_bound
+       FROM   handling_times_itemized ) 
+-- present a union of the same query for avg/min/max/median/percentiles being run twice, once while filtering out total ahts more than 1.65*std dev above total aht (normalized) and once while leaving those in (not normalized)
+SELECT 
+       -- This query calculates average/min/max/median/percentiles for all applications over the provided date range,
+       -- showing three separate rows for novo/mfs/total (thus pivoting the subquery) 
+       --unnest(array['mfs + novo (total)'])                                                                                                       AS “department”,
+       --'yes'                                                                                                                                       AS “normalized”,
+       unnest(array[total_handling_time_hours_avg])                                     AS “aht_hours_avg”
+--       unnest(array[novo_handling_time_hours_median, mfs_handling_time_hours_median, total_handling_time_hours_median])                            AS “aht_hours_median”,
+--       unnest(array[novo_handling_time_hours_min, mfs_handling_time_hours_min, total_handling_time_hours_min])                                     AS “aht_hours_min”,
+--       unnest(array[novo_handling_time_hours_max, mfs_handling_time_hours_max, total_handling_time_hours_max])                                     AS “aht_hours_max”,
+--       unnest(array[novo_handling_time_hours_80th_percentile, mfs_handling_time_hours_80th_percentile, total_handling_time_hours_80th_percentile]) AS “aht_hours_80th_percentile”
+FROM   ( 
+                -- This subquery calculates average/min/max/median/percentiles for all applications over the provided date range,
+                -- as a single returned row with all values in a separate column 
+                SELECT   avg(novo_handling_time_hours)                                         AS novo_handling_time_hours_avg,
+                         avg(mfs_handling_time_hours)                                          AS mfs_handling_time_hours_avg,
+                         avg(total_handling_time_hours)                                        AS total_handling_time_hours_avg,
+                         min(novo_handling_time_hours)                                         AS novo_handling_time_hours_min,
+                         min(mfs_handling_time_hours)                                          AS mfs_handling_time_hours_min,
+                         min(total_handling_time_hours)                                        AS total_handling_time_hours_min,
+                         max(novo_handling_time_hours)                                         AS novo_handling_time_hours_max,
+                         max(mfs_handling_time_hours)                                          AS mfs_handling_time_hours_max,
+                         max(total_handling_time_hours)                                        AS total_handling_time_hours_max,
+                         percentile_cont(0.5) within GROUP(ORDER BY novo_handling_time_hours)  AS novo_handling_time_hours_median,
+                         percentile_cont(0.5) within GROUP(ORDER BY mfs_handling_time_hours)   AS mfs_handling_time_hours_median,
+                         percentile_cont(0.5) within GROUP(ORDER BY total_handling_time_hours) AS total_handling_time_hours_median,
+                         percentile_cont(0.8) within GROUP(ORDER BY novo_handling_time_hours)  AS novo_handling_time_hours_80th_percentile,
+                         percentile_cont(0.8) within GROUP(ORDER BY mfs_handling_time_hours)   AS mfs_handling_time_hours_80th_percentile,
+                         percentile_cont(0.8) within GROUP(ORDER BY total_handling_time_hours) AS total_handling_time_hours_80th_percentile
+                FROM     handling_times_itemized 
+                WHERE    total_handling_time_hours < 
+                         ( 
+                                SELECT upper_bound 
+                                FROM   outlier_bounds) ) AS z 
