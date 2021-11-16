@@ -1,7 +1,7 @@
 ## grouped by count of customer touch points 
 
 
-WITH once_incomplete as (select application_id, event, description, created_at from application_events where event = 'closed' order by created_at desc ),
+WITH once_incomplete as (select application_id, event, description, created_at from application_events where event = 're_submitted' order by created_at desc ),
      account_opened as (select application_id, event, description, created_at from application_events where event = 'account_opened' order by created_at desc )
 select distinct ao.application_id, count(ao.event)
 from account_opened as ao
