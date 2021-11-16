@@ -1,0 +1,9 @@
+##dates keyed in manually 
+
+select
+    count( distinct application_id )
+from application_events 
+where event = 'denied'
+and description  ilike '%auto-%' 
+and created_at  BETWEEN ((timestamp '2021-11-05 00:00:00') AT TIME ZONE 'EST') 
+								 AND ((timestamp '2021-11-11 23:59:59') AT TIME ZONE 'EST')
