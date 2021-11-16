@@ -1,0 +1,7 @@
+##weekly_date_keyed_in
+
+select event, count(distinct application_id) 
+from application_events
+where created_at BETWEEN ((timestamp '2021-10-29 00:00:00') AT TIME ZONE 'EDT') 
+								 AND ((timestamp '2021-11-04 23:59:59') AT TIME ZONE 'EDT') 
+group by event 
