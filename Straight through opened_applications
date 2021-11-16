@@ -1,0 +1,18 @@
+select count(distinct application_id)
+from 
+(
+select distinct application_id, created_at, count(event) 
+from application_events as A1
+where/* application_id in (select id from applications_view where referral_source = 'azlo')
+	and */not exists
+	(select null from application_events as A2
+	 where A2.application_id = A1.application_id 
+	 and A2.event in ('doc-required', 'denied', 'incomplete', 'verified' ,'pending' ,'closed','freeze','re-open','escalated','re_submitted','returned_by_bank'/*,'Uploaded_doc'*/)
+	) 
+	and exists (select null from application_events as A3
+								 							where A1.application_id = A3.application_id
+								 							and A3.event = 'account_opened' 
+								 						and created_at BETWEEN ((timestamp '2021-11-05 00:00:00') AT TIME ZONE 'EST') 
+								 AND ((timestamp '2021-11-11 23:59:59') AT TIME ZONE 'EST'))
+group by application_id, created_at 
+) as ABC 
