@@ -1,0 +1,44 @@
+## this query does not take into consideration the applications that have had a 'stale' or a 'closed' event for the calculation 
+
+Average of all time taken to AO (minus applications that came from stale):                            
+                               
+       SELECT 
+              AVG(Extract(epoch FROM (account_opened - completed)::interval)/3600 )    AS total_handling_time_hours
+       FROM   ( 
+                       -- This subquery adds the completed and ready_to_open timestamps for the corresponding application as additional columns to every account_opened event
+                       -- it then renames the columns so that (for all account_opened events) the column names refer to the event name of the timestamp they contain
+                       SELECT   application_id, 
+                                event, 
+                                Lag(created_at, 2) OVER (partition BY application_id ORDER BY created_at ASC) AS completed,
+                                Lag(created_at) OVER (partition BY application_id ORDER BY created_at ASC)    AS ready_to_open,
+                                created_at                                                                    AS account_opened
+                       FROM     ( 
+                                         -- This subquery retrieves all completed, ready_to_open, and account_opened events for applications which resulted in an opened account
+                                         SELECT   application_id, 
+                                                  event, 
+                                                  created_at, 
+                                                  Row_number() OVER (partition BY event, application_id ORDER BY created_at ASC) AS duplication_index
+                                         FROM     application_events 
+                                         WHERE    event IN ('completed', 
+                                                            'ready_to_open', 
+                                                            'account_opened')        
+                                         AND      application_events.application_id IN 
+                                                  ( 
+                                                         SELECT application_id 
+                                                         FROM   application_events 
+                                                         WHERE  event = 'account_opened' 
+                                                         AND    created_at between ((timestamp '2020-11-01 00:00:00') AT TIME ZONE 'EST')
+                                                                 AND ((timestamp '2020-11-30 23:59:59') AT TIME ZONE 'EST')) 
+                                        AND       application_events.application_id NOT IN
+                                                 (                         
+                                                         SELECT application_id 
+                                                         FROM   application_events 
+                                                         WHERE  event NOT IN  ('stale', 'closed')
+                                                   )
+                                                  -- AND application_events.application_id IN (SELECT id FROM applications_view WHERE status='account_opened' AND created_at > CURRENT_DATE - INTERVAL '14 weeks')
+                                         ORDER BY application_id, 
+                                                  created_at ASC ) AS q 
+                                -- filter out duplicate events for the same application, only keeping the last occurrence of an event when duplicates exist
+                       WHERE    duplication_index = 1 ) AS x 
+              -- filter out all non-account_opened events as we have added the completed and ready_to_open timestamps as columns to those events
+       WHERE  event = 'account_opened'
