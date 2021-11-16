@@ -1,0 +1,15 @@
+Select  x.email, al.meta -> 'evaluation' -> 'evaluation' -> 'rawResponse'-> 'summary' -> 'outcome'
+from(
+SELECT *
+FROM (
+SELECT DISTINCT application_id, email, event, application_events.created_at as created
+FROM application_events
+inner join applications on application_events.application_id = applications.id
+WHERE event = 'account_opened'
+AND application_events.created_at BETWEEN '10-01-2021' and   '10-31-2021'
+) as foo
+)as x, alloy_evaluations as al
+where x.application_id = al.application_id
+and al.entity = 'business'
+Order by random()
+Limit 3252
