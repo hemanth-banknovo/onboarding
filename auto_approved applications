@@ -1,0 +1,7 @@
+select
+    count(distinct application_id)
+from application_events 
+where event = 'ready_to_open'
+and description  ilike '%auto-approved%'
+and created_at between ((timestamp '2021-11-05 00:00:00') AT TIME ZONE 'EDT') 
+								 AND ((timestamp '2021-11-11 23:59:59') AT TIME ZONE 'EDT') 
